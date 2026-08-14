@@ -73,7 +73,7 @@ each course as a separate root-correct mirror instead of linking itself. See
 
 | Course | Language | Lessons | Status |
 |---|---|---|---|
-| [rust-fundamentals](courses/rust-fundamentals) | Rust | 15 | not started |
+| [rust-fundamentals](courses/rust-fundamentals) | Rust | 15 | in progress — 1/15 |
 
 Planned, with the reasoning: [docs/roadmap.md](docs/roadmap.md).
 
