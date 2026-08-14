@@ -1,0 +1,20 @@
+# The shipthatcode grader compares program output to tests/*.out BYTE FOR BYTE.
+# On Windows, git's autocrlf would rewrite those files to CRLF on checkout and
+# every byte-exact test would fail locally for invisible reasons. Pin them.
+
+* text=auto eol=lf
+
+# Fixtures: never transformed, in either direction.
+#
+# These patterns are deliberately UNANCHORED (no slash), so they apply at any
+# depth. A pattern containing a slash -- `tests/**/*.out` -- is anchored to the
+# directory holding this file, which would only ever match a top-level tests/
+# and would silently do nothing for courses/<slug>/tests/.
+*.in            -text
+*.out           -text
+
+# Shell scripts must stay LF or bash in the container refuses them
+# ("bad interpreter: /usr/bin/env bash^M").
+*.sh            text eol=lf
+scripts/stc     text eol=lf
+run_tests.sh    text eol=lf

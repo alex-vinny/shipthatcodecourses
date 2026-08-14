@@ -1,0 +1,39 @@
+# ---------------------------------------------------------------------------
+# Lesson notes are NOT tracked, on purpose.
+#
+# This repo is public. The lesson prose on shipthatcode.com is their
+# copyrighted material -- pasting it here and pushing would republish it.
+# notes/ lives outside courses/ so it can never be swept into a public
+# per-course mirror by `stc publish` either.
+#
+# Your own solutions and your own summaries belong in courses/<slug>/ and ARE
+# tracked -- the grader needs them.
+# ---------------------------------------------------------------------------
+notes/*
+!notes/.gitkeep
+!notes/README.md
+
+# Original starter downloads, kept only so `stc sync` can diff a new zip
+# against the one you unpacked. Large and re-downloadable.
+.zips/*
+!.zips/.gitkeep
+
+# Build artifacts from run_tests.sh (it compiles to .prog next to the source)
+.prog
+.prog.o
+.prog.exe
+.prog.jar
+*.class
+
+# Per-language local caches, if you bind-mount them
+.cache/
+target/
+node_modules/
+__pycache__/
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/settings.json

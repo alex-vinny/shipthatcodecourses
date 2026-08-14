@@ -1,0 +1,47 @@
+{
+  "$comment": [
+    "Registry of every course unpacked into courses/. Maintained by `stc unpack`,",
+    "read by `stc test|shell|status|publish`. Hand-editing is fine.",
+    "",
+    "  slug       directory name under courses/, and the platform's course slug",
+    "  language   language slug from .shipthatcode.json; selects the container image",
+    "  entrypoint the single file the executor compiles",
+    "  lessons    lesson count, from .shipthatcode.json",
+    "  mirror     public repo the grader pulls; set it before `stc publish`",
+    "  linked     whether the mirror URL has been pasted on the course page yet",
+    "  status     not-started | in-progress | complete",
+    "  at         lesson number currently being worked on",
+    "",
+    "wishlist entries additionally carry:",
+    "  languages  the language options the course actually offers, once known",
+    "             (build courses let you choose; the set varies per course and",
+    "              isn't visible without logging in). null = not checked yet.",
+    "  pick       the language chosen for it -- see docs/roadmap.md for why"
+  ],
+  "courses": [
+    {
+      "slug": "rust-fundamentals",
+      "title": "Rust Fundamentals",
+      "url": "https://shipthatcode.com/courses/rust-fundamentals",
+      "language": "rust",
+      "language_id": 73,
+      "entrypoint": "main.rs",
+      "lessons": 15,
+      "mirror": null,
+      "linked": false,
+      "status": "not-started",
+      "at": "01"
+    }
+  ],
+  "wishlist": [
+    { "slug": "build-database",            "title": "Build a Database",            "lessons": 34,   "phase": 1,  "languages": null, "pick": "c",      "url": "https://shipthatcode.com/courses/build-database" },
+    { "slug": "build-os-kernel",           "title": "Build an OS Kernel",          "lessons": 24,   "phase": 2,  "languages": null, "pick": "c",      "url": "https://shipthatcode.com/courses/build-os-kernel" },
+    { "slug": "build-programming-language","title": "Build a Programming Language","lessons": 38,   "phase": 3,  "languages": null, "pick": "ocaml",  "url": "https://shipthatcode.com/courses/build-programming-language" },
+    { "slug": "build-git",                 "title": "Build Git",                   "lessons": 18,   "phase": "interlude", "languages": null, "pick": "rust", "url": "https://shipthatcode.com/courses/build-git" },
+    { "slug": "build-kafka",               "title": "Build Kafka",                 "lessons": null, "phase": "wildcard",  "languages": null, "pick": "elixir", "url": "https://shipthatcode.com/courses/build-kafka" },
+    { "slug": "build-raft-kv",             "title": "Build a Raft KV Store",       "lessons": 12,   "phase": "wildcard",  "languages": null, "pick": "elixir", "url": "https://shipthatcode.com/courses/build-raft-kv" },
+    { "slug": "build-redis",               "title": "Build Redis",                 "lessons": 29,   "phase": "maybe", "languages": null, "pick": null, "url": "https://shipthatcode.com/courses/build-redis" },
+    { "slug": "build-docker",              "title": "Build a Container Runtime",   "lessons": 19,   "phase": "maybe", "languages": null, "pick": null, "url": "https://shipthatcode.com/courses/build-docker" },
+    { "slug": "build-shell",               "title": "Build a Shell",               "lessons": 16,   "phase": "maybe", "languages": null, "pick": null, "url": "https://shipthatcode.com/courses/build-shell" }
+  ]
+}

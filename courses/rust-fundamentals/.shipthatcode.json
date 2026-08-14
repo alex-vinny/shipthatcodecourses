@@ -1,0 +1,70 @@
+{
+  "course": "rust-fundamentals",
+  "language": "rust",
+  "language_id": 73,
+  "entrypoint": "main.rs",
+  "version": 1,
+  "content_hash": "fbe14a2385e94b8d",
+  "lessons": [
+    {
+      "slug": "hello-world",
+      "tests_hash": "e70c2a0539c7"
+    },
+    {
+      "slug": "variables-and-mutability",
+      "tests_hash": "4ccc141f8a2f"
+    },
+    {
+      "slug": "numbers-and-math",
+      "tests_hash": "69adc0cc5957"
+    },
+    {
+      "slug": "string-and-str",
+      "tests_hash": "00b8b70233d2"
+    },
+    {
+      "slug": "formatting",
+      "tests_hash": "eb06fa6128a5"
+    },
+    {
+      "slug": "if-and-match",
+      "tests_hash": "1720a777f726"
+    },
+    {
+      "slug": "loops",
+      "tests_hash": "d936b3338ca8"
+    },
+    {
+      "slug": "functions",
+      "tests_hash": "4e6757737a4d"
+    },
+    {
+      "slug": "ownership-and-borrowing",
+      "tests_hash": "9def5825ee09"
+    },
+    {
+      "slug": "vec",
+      "tests_hash": "824618d94a04"
+    },
+    {
+      "slug": "hashmap",
+      "tests_hash": "6da2ebbae97c"
+    },
+    {
+      "slug": "iterators",
+      "tests_hash": "2ef2107d7b83"
+    },
+    {
+      "slug": "structs",
+      "tests_hash": "c720ce1dc898"
+    },
+    {
+      "slug": "enums-and-match",
+      "tests_hash": "67c72807e37e"
+    },
+    {
+      "slug": "result-option",
+      "tests_hash": "bc00b39a895b"
+    }
+  ]
+}

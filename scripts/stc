@@ -1,0 +1,386 @@
+#!/usr/bin/env bash
+# stc -- helper for the shipthatcode course monorepo.
+#
+# Design notes:
+#  * Nothing is installed on the host. Every compile/run happens in a throwaway
+#    container whose image is chosen from the course's own .shipthatcode.json.
+#  * The course's own run_tests.sh is used verbatim; this only supplies the
+#    environment for it.
+#  * Mirror remotes are stored as git remotes named mirror-<slug>, so no JSON
+#    writing is needed for anything load-bearing. courses.json is for tracking.
+#
+# See AGENTS.md and docs/ for the workflow.
+
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SELF_DIR/.." && pwd)"
+# shellcheck source=lib/langmap.sh
+. "$SELF_DIR/lib/langmap.sh"
+
+# ---------------------------------------------------------------- output ----
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  B=$'\033[1m'; DIM=$'\033[2m'; R=$'\033[31m'; G=$'\033[32m'; Y=$'\033[33m'; Z=$'\033[0m'
+else
+  B=''; DIM=''; R=''; G=''; Y=''; Z=''
+fi
+info() { printf '%s\n' "$*" >&2; }
+warn() { printf '%swarn%s %s\n' "$Y" "$Z" "$*" >&2; }
+die()  { printf '%serror%s %s\n' "$R" "$Z" "$*" >&2; exit 1; }
+
+# ------------------------------------------------------------- utilities ----
+
+# Docker Desktop on Windows needs a native path for -v. cygpath -m yields
+# D:/path/... which it accepts; MSYS_NO_PATHCONV stops MSYS mangling /work.
+host_path() {
+  if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
+}
+
+# Bind-mount source for a path in this environment.
+#
+# The subtlety: -v is always interpreted by the docker DAEMON, never by us. When
+# stc runs inside the devcontainer it talks to the host's daemon through a
+# mounted socket, so a path like /workspaces/shipthatcodecourses means nothing to
+# it and would silently mount an empty directory. devcontainer.json therefore
+# exports STC_HOST_ROOT=${localWorkspaceFolder} and we rewrite back to it.
+bind_source() { # bind_source <abs-path-in-this-env>
+  local p="$1"
+  if [ -n "${STC_HOST_ROOT:-}" ]; then
+    printf '%s' "${STC_HOST_ROOT%/}${p#"$ROOT"}"
+  else
+    host_path "$p"
+  fi
+}
+
+need_docker() {
+  command -v docker >/dev/null 2>&1 || die "docker not found on PATH"
+  docker info >/dev/null 2>&1 || die "the docker daemon is not responding -- start Docker Desktop"
+}
+
+course_dir() {
+  local slug="$1" d="$ROOT/courses/$1"
+  [ -d "$d" ] || die "no course at courses/$slug (run: stc unpack <zip>)"
+  [ -f "$d/.shipthatcode.json" ] || die "courses/$slug has no .shipthatcode.json -- not a starter?"
+  printf '%s' "$d"
+}
+
+# Flat-key scrape of .shipthatcode.json. No jq dependency; the file is machine
+# generated and flat for these keys, so this is safe enough.
+meta() { # meta <course-dir> <key>
+  sed -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"\{0,1\}\([^\",}]*\)\"\{0,1\}.*/\1/p" \
+      "$1/.shipthatcode.json" | head -n1
+}
+meta_lessons() { grep -c '"slug"' "$1/.shipthatcode.json" || true; }
+
+all_slugs() {
+  [ -d "$ROOT/courses" ] || return 0
+  for d in "$ROOT/courses"/*/; do
+    [ -f "$d/.shipthatcode.json" ] || continue
+    basename "$d"
+  done
+}
+
+extract_zip() { # extract_zip <zip> <destdir>
+  local zip="$1" dest="$2"
+  mkdir -p "$dest"
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -q "$zip" -d "$dest"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -m zipfile -e "$zip" "$dest"
+  elif command -v python >/dev/null 2>&1; then
+    python -m zipfile -e "$zip" "$dest"
+  elif command -v powershell >/dev/null 2>&1; then
+    powershell -NoProfile -Command \
+      "Expand-Archive -LiteralPath '$(host_path "$zip")' -DestinationPath '$(host_path "$dest")' -Force"
+  else
+    die "no way to unzip: install unzip, or have python/powershell on PATH"
+  fi
+}
+
+# ---------------------------------------------------------------- images ----
+
+# Echoes the image to use for a language, building the apt-based one if needed.
+resolve_image() { # resolve_image <language> [--build]
+  local lang="$1" build="${2:-}" why img pkgs tag
+  why="$(stc_lang_unsupported "$lang")"
+  if [ -n "$why" ]; then
+    die "language '$lang' can't run locally: $why
+      Write the solution, publish, and grade with 'Check my solution' on the lesson page."
+  fi
+  img="$(stc_lang_image "$lang")"
+  if [ -n "$img" ]; then printf '%s' "$img"; return 0; fi
+
+  pkgs="$(stc_lang_apt "$lang")"
+  [ -n "$pkgs" ] || die "no image mapped for language '$lang'.
+      Add it to scripts/lib/langmap.sh (see AGENTS.md rule 3)."
+
+  tag="stc-lang-$lang"
+  if [ "$build" = "--build" ] || ! docker image inspect "$tag" >/dev/null 2>&1; then
+    info "${DIM}building $tag ($pkgs)…${Z}"
+    docker build -q -t "$tag" - >/dev/null <<EOF
+FROM $STC_APT_BASE
+RUN apt-get update \\
+ && apt-get install -y --no-install-recommends $pkgs \\
+ && rm -rf /var/lib/apt/lists/*
+EOF
+  fi
+  printf '%s' "$tag"
+}
+
+# Runs a command inside the course's toolchain container, cwd = course root.
+in_container() { # in_container <slug> <docker-run-extra-flags...> -- <cmd...>
+  local slug="$1"; shift
+  local dir lang img flags=()
+  dir="$(course_dir "$slug")"
+  lang="$(meta "$dir" language)"
+  [ -n "$lang" ] || die "could not read \"language\" from courses/$slug/.shipthatcode.json"
+  need_docker
+  img="$(resolve_image "$lang")"
+
+  while [ "${1:-}" != "--" ]; do flags+=("$1"); shift; done
+  shift
+
+  MSYS_NO_PATHCONV=1 docker run --rm \
+    -v "$(bind_source "$dir"):/work" -w /work \
+    -e HOME=/tmp -e LC_ALL=C.UTF-8 \
+    "${flags[@]}" "$img" "$@"
+}
+
+# -------------------------------------------------------------- commands ----
+
+cmd_unpack() {
+  local zip="${1:-}"
+  [ -n "$zip" ] || die "usage: stc unpack <starter.zip>"
+  [ -f "$zip" ] || die "no such file: $zip"
+
+  local tmp src slug
+  tmp="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" RETURN
+  extract_zip "$zip" "$tmp"
+
+  # The starter root is wherever .shipthatcode.json landed (zip may or may not
+  # have a wrapper directory).
+  src="$(dirname "$(find "$tmp" -name .shipthatcode.json -print -quit)")"
+  [ -n "$src" ] && [ -d "$src" ] || die "no .shipthatcode.json inside $zip -- is this a shipthatcode starter?"
+
+  slug="$(meta "$src" course)"
+  [ -n "$slug" ] || die "starter has no \"course\" field"
+
+  local dest="$ROOT/courses/$slug"
+  [ -e "$dest" ] && die "courses/$slug already exists.
+      To take an upstream course update instead: stc sync $slug \"$zip\""
+
+  # A nested .git would shadow the monorepo and break subtree publishing.
+  rm -rf "$src/.git"
+  mkdir -p "$ROOT/courses"
+  mv "$src" "$dest"
+  chmod +x "$dest/run_tests.sh" 2>/dev/null || true
+
+  mkdir -p "$ROOT/.zips"
+  cp "$zip" "$ROOT/.zips/$slug.zip"
+
+  local lang ep n
+  lang="$(meta "$dest" language)"; ep="$(meta "$dest" entrypoint)"; n="$(meta_lessons "$dest")"
+  printf '%sunpacked%s courses/%s  (%s, %s, %s lessons)\n' "$G" "$Z" "$slug" "$lang" "$ep" "$n"
+  cat >&2 <<EOF
+
+next:
+  1. add it to courses.json (registry entry below)
+  2. stc test $slug 01
+  3. create an empty PUBLIC repo, then:
+       stc remote $slug https://github.com/<you>/stc-$slug.git
+       stc publish $slug
+     and paste that URL once on the course page ("Link repo")
+
+registry entry for courses.json:
+    {
+      "slug": "$slug",
+      "url": "https://shipthatcode.com/courses/$slug",
+      "language": "$lang",
+      "entrypoint": "$ep",
+      "lessons": $n,
+      "mirror": null,
+      "linked": false,
+      "status": "not-started",
+      "at": "01"
+    }
+EOF
+}
+
+cmd_test() {
+  local slug="${1:-}" filter="${2:-}"
+  [ -n "$slug" ] || die "usage: stc test <slug> [lesson-number]"
+  info "${DIM}running $slug tests${filter:+ (lesson $filter)} in container…${Z}"
+  in_container "$slug" -- bash ./run_tests.sh ${filter:+"$filter"}
+}
+
+cmd_shell() {
+  local slug="${1:-}"
+  [ -n "$slug" ] || die "usage: stc shell <slug>"
+  info "${DIM}shell in $slug toolchain; the course root is /work${Z}"
+  in_container "$slug" -it -- bash
+}
+
+cmd_lang() {
+  local slug="${1:-}" dir lang img
+  [ -n "$slug" ] || die "usage: stc lang <slug>"
+  dir="$(course_dir "$slug")"; lang="$(meta "$dir" language)"
+  need_docker
+  img="$(resolve_image "$lang" --build)"
+  printf '%s -> %s\n' "$lang" "$img"
+}
+
+cmd_remote() {
+  local slug="${1:-}" url="${2:-}"
+  [ -n "$slug" ] || die "usage: stc remote <slug> [git-url]"
+  course_dir "$slug" >/dev/null
+  if [ -z "$url" ]; then
+    git -C "$ROOT" remote get-url "mirror-$slug" 2>/dev/null || die "no mirror remote set for $slug"
+    return
+  fi
+  if git -C "$ROOT" remote get-url "mirror-$slug" >/dev/null 2>&1; then
+    git -C "$ROOT" remote set-url "mirror-$slug" "$url"
+  else
+    git -C "$ROOT" remote add "mirror-$slug" "$url"
+  fi
+  printf '%sset%s mirror-%s -> %s\n' "$G" "$Z" "$slug" "$url"
+}
+
+cmd_publish() {
+  local slug="${1:-}"
+  [ -n "$slug" ] || die "usage: stc publish <slug>"
+  course_dir "$slug" >/dev/null
+
+  local url branch
+  url="$(git -C "$ROOT" remote get-url "mirror-$slug" 2>/dev/null || true)"
+  [ -n "$url" ] || die "no mirror remote for $slug.
+      Create an empty PUBLIC repo on GitHub, then:
+        stc remote $slug https://github.com/<you>/stc-$slug.git"
+
+  # subtree split only sees committed history.
+  if ! git -C "$ROOT" diff --quiet -- "courses/$slug" ||
+     ! git -C "$ROOT" diff --cached --quiet -- "courses/$slug" ||
+     [ -n "$(git -C "$ROOT" ls-files --others --exclude-standard -- "courses/$slug")" ]; then
+    die "courses/$slug has uncommitted changes; subtree split would publish stale code.
+      Commit first:  git add courses/$slug && git commit -m \"$slug: lesson NN\""
+  fi
+
+  branch="_publish/$slug"
+  info "${DIM}splitting courses/$slug -> $branch${Z}"
+  git -C "$ROOT" branch -D "$branch" >/dev/null 2>&1 || true
+  git -C "$ROOT" subtree split --prefix="courses/$slug" -b "$branch" >/dev/null
+
+  info "${DIM}force-pushing $branch -> $url (main)${Z}"
+  git -C "$ROOT" push --force "mirror-$slug" "$branch:refs/heads/main"
+  git -C "$ROOT" branch -D "$branch" >/dev/null 2>&1 || true
+
+  printf '%spublished%s %s -> %s\n' "$G" "$Z" "$slug" "$url"
+  info "if this is the first push, paste that URL on the course page (\"Link repo\"), then hit \"Check my solution\"."
+}
+
+cmd_sync() {
+  local slug="${1:-}" zip="${2:-}"
+  [ -n "$slug" ] && [ -n "$zip" ] || die "usage: stc sync <slug> <fresh-starter.zip>"
+  [ -f "$zip" ] || die "no such file: $zip"
+  local dir; dir="$(course_dir "$slug")"
+
+  local tmp src
+  tmp="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" RETURN
+  extract_zip "$zip" "$tmp"
+  src="$(dirname "$(find "$tmp" -name .shipthatcode.json -print -quit)")"
+  [ -n "$src" ] && [ -d "$src" ] || die "no .shipthatcode.json inside $zip"
+
+  local newslug; newslug="$(meta "$src" course)"
+  [ "$newslug" = "$slug" ] || die "that zip is for '$newslug', not '$slug'"
+
+  # Upstream guidance: replace tests/ wholesale, never merge -- lesson numbering
+  # can shift between versions. Your entrypoint is never touched.
+  local ep; ep="$(meta "$dir" entrypoint)"
+  info "replacing tests/ and .shipthatcode.json; keeping $ep and everything else"
+  rm -rf "$dir/tests"
+  cp -R "$src/tests" "$dir/tests"
+  cp "$src/.shipthatcode.json" "$dir/.shipthatcode.json"
+  [ -f "$src/run_tests.sh" ] && cp "$src/run_tests.sh" "$dir/run_tests.sh"
+  chmod +x "$dir/run_tests.sh" 2>/dev/null || true
+  cp "$zip" "$ROOT/.zips/$slug.zip"
+
+  printf '%ssynced%s %s (now %s lessons)\n' "$G" "$Z" "$slug" "$(meta_lessons "$dir")"
+  info "review with: git -C \"$ROOT\" diff --stat -- courses/$slug"
+}
+
+cmd_note() {
+  local slug="${1:-}" lesson="${2:-}"
+  [ -n "$slug" ] && [ -n "$lesson" ] || die "usage: stc note <slug> <nn-lesson-slug>   (pipe the text in, or edit after)"
+  course_dir "$slug" >/dev/null
+  local d="$ROOT/notes/$slug" f
+  mkdir -p "$d"
+  f="$d/$lesson.md"
+  if [ ! -f "$f" ]; then
+    cat > "$f" <<EOF
+# $slug / $lesson
+
+<!-- Untracked (see notes/README.md). Paraphrase the lesson; don't paste it. -->
+
+## Idea
+
+## Gotchas the tests caught
+
+## Questions
+EOF
+  fi
+  if [ ! -t 0 ]; then { printf '\n'; cat; } >> "$f"; info "appended stdin to $f"; fi
+  printf '%s\n' "$f"
+}
+
+cmd_status() {
+  local slugs; slugs="$(all_slugs)"
+  [ -n "$slugs" ] || { info "no courses yet -- stc unpack <zip>"; return 0; }
+  printf '%s%-28s %-11s %-12s %-8s %-7s %s%s\n' "$B" COURSE LANGUAGE ENTRYPOINT LESSONS GIT MIRROR "$Z"
+  local slug dir lang ep n dirty mirror
+  while IFS= read -r slug; do
+    dir="$ROOT/courses/$slug"
+    lang="$(meta "$dir" language)"; ep="$(meta "$dir" entrypoint)"; n="$(meta_lessons "$dir")"
+    if [ -n "$(git -C "$ROOT" status --porcelain -- "courses/$slug" 2>/dev/null)" ]; then
+      dirty="${Y}dirty${Z}"
+    else
+      dirty="${G}clean${Z}"
+    fi
+    mirror="$(git -C "$ROOT" remote get-url "mirror-$slug" 2>/dev/null || printf '%s' "${DIM}unset${Z}")"
+    printf '%-28s %-11s %-12s %-8s %-16b %b\n' "$slug" "$lang" "$ep" "$n" "$dirty" "$mirror"
+  done <<< "$slugs"
+}
+
+cmd_help() {
+  cat <<EOF
+${B}stc${Z} -- shipthatcode course monorepo helper
+
+  ${B}stc unpack${Z} <zip>              unpack a downloaded starter into courses/<slug>/
+  ${B}stc test${Z} <slug> [nn]          run the course tests in its own container
+  ${B}stc shell${Z} <slug>              interactive shell in that course's toolchain
+  ${B}stc status${Z}                    all courses: language, lessons, git state, mirror
+  ${B}stc sync${Z} <slug> <zip>         take an upstream course update (replaces tests/ only)
+  ${B}stc remote${Z} <slug> [url]       get/set the public grading mirror for a course
+  ${B}stc publish${Z} <slug>            subtree-split the course and force-push to its mirror
+  ${B}stc note${Z} <slug> <nn-lesson>   create/append an untracked note under notes/
+  ${B}stc lang${Z} <slug>               show and pre-build the container image
+
+Nothing is installed on the host; Docker must be running. Full workflow: AGENTS.md
+EOF
+}
+
+case "${1:-help}" in
+  unpack)  shift; cmd_unpack  "$@" ;;
+  test|t)  shift; cmd_test    "$@" ;;
+  shell|sh)shift; cmd_shell   "$@" ;;
+  status|st)shift; cmd_status "$@" ;;
+  sync)    shift; cmd_sync    "$@" ;;
+  remote)  shift; cmd_remote  "$@" ;;
+  publish) shift; cmd_publish "$@" ;;
+  note)    shift; cmd_note    "$@" ;;
+  lang)    shift; cmd_lang    "$@" ;;
+  help|-h|--help) cmd_help ;;
+  *) die "unknown command '$1' (try: stc help)" ;;
+esac

@@ -1,0 +1,52 @@
+{
+  "name": "shipthatcode hub",
+
+  // Deliberately a THIN container. It holds the hub tooling (git, docker CLI,
+  // shellcheck) -- not language toolchains. `stc` launches a per-course
+  // container chosen from that course's .shipthatcode.json, so the toolchain
+  // always matches whatever the course teaches and this image never grows.
+  // See docs/environment.md.
+  "image": "mcr.microsoft.com/devcontainers/base:bookworm",
+
+  "features": {
+    // Gives the docker CLI inside, wired to the HOST daemon. Language
+    // containers then run as siblings, not nested.
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "moby": false
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+
+  "containerEnv": {
+    // Required: sibling containers get their -v paths interpreted by the host
+    // daemon, so stc must rewrite workspace paths back to host paths.
+    // See bind_source() in scripts/stc.
+    "STC_HOST_ROOT": "${localWorkspaceFolder}"
+  },
+
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:${containerWorkspaceFolder}/scripts"
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "timonwong.shellcheck",
+        "ms-azuretools.vscode-docker",
+        "editorconfig.editorconfig"
+      ],
+      "settings": {
+        // Byte-exact fixtures: never let the editor touch line endings or add
+        // a trailing newline to tests/*.out.
+        "files.eol": "\n",
+        "files.insertFinalNewline": false,
+        "files.trimTrailingWhitespace": false,
+        "[markdown]": { "files.trimTrailingWhitespace": false }
+      }
+    }
+  },
+
+  "postCreateCommand": "chmod +x scripts/stc courses/*/run_tests.sh 2>/dev/null; git config --global --add safe.directory ${containerWorkspaceFolder}; true",
+
+  "postAttachCommand": "echo 'stc ready -- try: stc status'"
+}

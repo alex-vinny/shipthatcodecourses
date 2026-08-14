@@ -1,0 +1,48 @@
+{
+  // OPTIONAL, and only if you want full language-server editing (rust-analyzer,
+  // clangd, …) for one course.
+  //
+  // The hub devcontainer stays language-free on purpose. `stc test` and
+  // `stc shell` already give you the real toolchain in a container, which is
+  // enough to compile and grade. This file is for when you also want inline
+  // diagnostics and go-to-definition while writing.
+  //
+  // Usage:
+  //   mkdir -p courses/<slug>/.devcontainer
+  //   cp .devcontainer/course.example.json courses/<slug>/.devcontainer/devcontainer.json
+  //   ...edit "image"/"features" for that course's language, then
+  //   "Dev Containers: Reopen in Container" with the course folder open.
+  //
+  // Safe to commit: the grader only reads .shipthatcode.json, the entrypoint and
+  // tests/, so a .devcontainer/ directory in a course is inert.
+
+  "name": "course: CHANGE-ME",
+
+  // Pick the image for the course's language -- the same one
+  // scripts/lib/langmap.sh would choose. Examples:
+  //   rust   -> mcr.microsoft.com/devcontainers/rust:1
+  //   c/cpp  -> mcr.microsoft.com/devcontainers/cpp:debian
+  //   go     -> mcr.microsoft.com/devcontainers/go:1
+  //   python -> mcr.microsoft.com/devcontainers/python:3.12
+  //   ts/js  -> mcr.microsoft.com/devcontainers/typescript-node:22
+  "image": "mcr.microsoft.com/devcontainers/rust:1",
+
+  "customizations": {
+    "vscode": {
+      // Add the language server for this course, e.g.
+      //   rust-lang.rust-analyzer | llvm-vs-code-extensions.vscode-clangd | golang.go
+      "extensions": ["rust-lang.rust-analyzer"],
+      "settings": {
+        "files.eol": "\n",
+        "files.insertFinalNewline": false
+      }
+    }
+  },
+
+  // Single-file courses have no manifest, so language servers that expect one
+  // need a nudge. For rust-analyzer on a bare main.rs:
+  //   "rust-analyzer.linkedProjects": [],
+  //   "rust-analyzer.detachedFiles": ["main.rs"]
+
+  "postCreateCommand": "chmod +x run_tests.sh 2>/dev/null; true"
+}

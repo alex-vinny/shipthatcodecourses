@@ -1,0 +1,8 @@
+Read AGENTS.md at the repository root and follow it. It is the single source of
+truth for this repo; this file exists only to point you there.
+
+Most easily broken rules: never edit courses/*/tests/** or
+courses/*/.shipthatcode.json; write solutions only in the course's declared
+entrypoint (one file per course, no extra modules, no added build system);
+never install a toolchain on the host, use scripts/stc which runs Docker; tests
+are byte-exact; do not paste course lesson prose into tracked files.
