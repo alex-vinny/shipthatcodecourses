@@ -27,7 +27,7 @@
       "language_id": 73,
       "entrypoint": "main.rs",
       "lessons": 15,
-      "mirror": null,
+      "mirror": "https://github.com/alex-vinny/stc-rust-fundamentals",
       "linked": false,
       "status": "in-progress",
       "at": "02"
